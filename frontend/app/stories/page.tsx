@@ -9,6 +9,7 @@ import { Label } from "../../components/ui/label"
 import { Textarea } from "../../components/ui/textarea"
 import Cookies from 'js-cookie'
 import { useRouter } from 'next/navigation'
+import { toast } from '../../hooks/use-toast'
 
 interface Story {
   id: string
@@ -30,7 +31,7 @@ export default function Component() {
   const [newDescription, setNewDescription] = useState('')
   const [isOpen, setIsOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
-  const API_URL = process.env.API_URL || "http://localhost:8080"
+  const API_URL = process.env.NEXT_PUBLIC_API_URL
   const router = useRouter()
 
   const fetchStories = async () => {
@@ -81,6 +82,10 @@ export default function Component() {
       }
     } catch (err) {
       console.error('Failed to create story:', err)
+      toast({
+        title: 'Error',
+        description: 'Failed to create story',
+      })
     }
   }
 

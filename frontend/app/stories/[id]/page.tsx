@@ -42,7 +42,7 @@ export default function StoryDetail() {
   const [isEditChapterOpen, setIsEditChapterOpen] = useState(false)
   const [editedStoryTitle, setEditedStoryTitle] = useState('')
   const [editedChapterTitle, setEditedChapterTitle] = useState('')
-  const API_URL = process.env.API_URL || "http://localhost:8080"
+  const API_URL = process.env.NEXT_PUBLIC_API_URL
   const params = useParams()
   const storyId = params.id as string
   const { toast } = useToast()
