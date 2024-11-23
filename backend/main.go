@@ -12,9 +12,9 @@ import (
     "crypto/rand"
     "encoding/base64"
     "fmt"
-    "net/smtp"
     "golang.org/x/oauth2"
     "golang.org/x/oauth2/google"
+    "bytes"
 
     "github.com/golang-jwt/jwt/v5"
     "github.com/gorilla/mux"
@@ -81,10 +81,9 @@ var users *mongo.Collection
 var stories *mongo.Collection
 var chapters *mongo.Collection
 var jwtKey = []byte("your-secret-key") // In production, use environment variable
-var emailFrom     = os.Getenv("EMAIL_FROM")
-var emailPassword = os.Getenv("EMAIL_PASSWORD")
-var smtpHost      = os.Getenv("SMTP_HOST")
-var smtpPort      = os.Getenv("SMTP_PORT")
+var brevoAPIKey = os.Getenv("BREVO_API_KEY")
+var emailFrom = os.Getenv("EMAIL_FROM") 
+var emailFromName = os.Getenv("EMAIL_FROM_NAME")
 var frontendURL   = os.Getenv("FRONTEND_URL")
 var googleOauthConfig = &oauth2.Config{
     ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
@@ -98,8 +97,28 @@ var googleOauthConfig = &oauth2.Config{
 }
 
 func main() {
-    // Load .env
-    godotenv.Load()
+    // Load .env file before using any env variables
+    err := godotenv.Load()
+    if err != nil {
+        log.Printf("Error loading .env file: %v", err)
+        // Continue execution, don't fatal as the env vars might be set directly
+    }
+
+    // Move these variables inside main() after loading .env
+    brevoAPIKey = os.Getenv("BREVO_API_KEY")
+    emailFrom = os.Getenv("EMAIL_FROM") 
+    emailFromName = os.Getenv("EMAIL_FROM_NAME")
+    frontendURL = os.Getenv("FRONTEND_URL")
+    googleOauthConfig = &oauth2.Config{
+        ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
+        ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+        RedirectURL:  os.Getenv("GOOGLE_REDIRECT_URL"),
+        Scopes: []string{
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/userinfo.profile",
+        },
+        Endpoint: google.Endpoint,
+    }
 
     // Connect to MongoDB with longer timeout and TLS config
     ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -1023,23 +1042,69 @@ func generateRandomToken() string {
 }
 
 func sendEmail(to, subject, body string) error {
-    auth := smtp.PlainAuth("", emailFrom, emailPassword, smtpHost)
-    msg := fmt.Sprintf("To: %s\r\nSubject: %s\r\n\r\n%s", to, subject, body)
-    return smtp.SendMail(smtpHost+":"+smtpPort, auth, emailFrom, []string{to}, []byte(msg))
+    payload := map[string]interface{}{
+        "sender": map[string]string{
+            "name":  emailFromName,
+            "email": emailFrom,
+        },
+        "to": []map[string]string{
+            {"email": to},
+        },
+        "subject": subject,
+        "htmlContent": body,
+    }
+
+    jsonData, err := json.Marshal(payload)
+    if err != nil {
+        return err
+    }
+
+    req, err := http.NewRequest("POST", "https://api.brevo.com/v3/smtp/email", bytes.NewBuffer(jsonData))
+    if err != nil {
+        return err
+    }
+
+    req.Header.Set("accept", "application/json")
+    req.Header.Set("api-key", brevoAPIKey)
+    req.Header.Set("content-type", "application/json")
+
+    client := &http.Client{}
+    resp, err := client.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode >= 400 {
+        var errorResponse struct {
+            Message string `json:"message"`
+        }
+        if err := json.NewDecoder(resp.Body).Decode(&errorResponse); err != nil {
+            return fmt.Errorf("email service error: %d", resp.StatusCode)
+        }
+        return fmt.Errorf("email service error: %s", errorResponse.Message)
+    }
+
+    return nil
 }
 
 func forgotPasswordHandler(w http.ResponseWriter, r *http.Request) {
+    log.Printf("Received forgot password request")
+    
     var req struct {
         Email string `json:"email"`
     }
     if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        log.Printf("Error decoding request body: %v", err)
         sendError(w, "Invalid request body", http.StatusBadRequest)
         return
     }
 
+    log.Printf("Generating reset token for email: %s", req.Email)
     resetToken := generateRandomToken()
     expiry := time.Now().Add(15 * time.Minute)
 
+    log.Printf("Updating user record with reset token")
     result := users.FindOneAndUpdate(
         context.Background(),
         bson.M{"email": req.Email},
@@ -1049,18 +1114,28 @@ func forgotPasswordHandler(w http.ResponseWriter, r *http.Request) {
         }},
     )
     if result.Err() != nil {
+        log.Printf("Email not found: %s", req.Email)
         sendError(w, "Email not found", http.StatusNotFound)
         return
     }
 
+    log.Printf("Generating reset password email")
     resetLink := fmt.Sprintf("%s/reset-password?token=%s", frontendURL, resetToken)
-    emailBody := fmt.Sprintf("Click the following link to reset your password: %s", resetLink)
+    emailBody := fmt.Sprintf(`
+        <h1>Password Reset Request</h1>
+        <p>Click the following link to reset your password:</p>
+        <p><a href="libreprose.com/reset-password?token=%s">Reset Password</a></p>
+        <p>If you didn't request this, please ignore this email.</p>
+    `, resetLink)
     
+    log.Printf("Sending reset password email to: %s", req.Email)
     if err := sendEmail(req.Email, "Password Reset Request", emailBody); err != nil {
+        log.Printf("Error sending reset email: %v", err)
         sendError(w, "Error sending email", http.StatusInternalServerError)
         return
     }
 
+    log.Printf("Successfully sent reset password email to: %s", req.Email)
     sendJSON(w, Response{Status: "success", Message: "Password reset email sent"})
 }
 
@@ -1102,19 +1177,23 @@ func resetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 
     sendJSON(w, Response{Status: "success", Message: "Password reset successful"})
 }
-
 func emailLoginHandler(w http.ResponseWriter, r *http.Request) {
+    log.Printf("Email login request received")
+    
     var req struct {
         Email string `json:"email"`
     }
     if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        log.Printf("Error decoding request body: %v", err)
         sendError(w, "Invalid request body", http.StatusBadRequest)
         return
     }
 
+    log.Printf("Generating OTP for email: %s", req.Email)
     otp := generateOTP()
-    expiry := time.Now().Add(5 * time.Minute)
+    expiry := time.Now().Add(50)
 
+    log.Printf("Updating user record with OTP")
     result := users.FindOneAndUpdate(
         context.Background(),
         bson.M{"email": req.Email},
@@ -1124,15 +1203,26 @@ func emailLoginHandler(w http.ResponseWriter, r *http.Request) {
         }},
     )
     if result.Err() != nil {
+        log.Printf("Email not found: %s", req.Email)
         sendError(w, "Email not found", http.StatusNotFound)
         return
     }
 
-    if err := sendEmail(req.Email, "Login OTP", fmt.Sprintf("Your OTP is: %s", otp)); err != nil {
+    log.Printf("Sending OTP email to: %s", req.Email)
+    emailBody := fmt.Sprintf(`
+        <h1>Login OTP</h1>
+        <p>Your one-time password is: <strong>%s</strong></p>
+        <p>This OTP will expire in 5 minutes.</p>
+        <p>If you didn't request this, please ignore this email.</p>
+    `, otp)
+
+    if err := sendEmail(req.Email, "Login OTP", emailBody); err != nil {
+        log.Printf("Error sending OTP email: %v", err)
         sendError(w, "Error sending OTP", http.StatusInternalServerError)
         return
     }
 
+    log.Printf("OTP sent successfully to: %s", req.Email)
     sendJSON(w, Response{Status: "success", Message: "OTP sent to email"})
 }
 
