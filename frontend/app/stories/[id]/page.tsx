@@ -42,7 +42,7 @@ export default function StoryDetail() {
   const [isEditChapterOpen, setIsEditChapterOpen] = useState(false)
   const [editedStoryTitle, setEditedStoryTitle] = useState('')
   const [editedChapterTitle, setEditedChapterTitle] = useState('')
-  const API_URL = process.env.NEXT_PUBLIC_API_URL
+  const API_URL = "https://libreprose.onrender.com"
   const params = useParams()
   const storyId = params.id as string
   const { toast } = useToast()

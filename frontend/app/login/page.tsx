@@ -17,7 +17,7 @@ export default function LoginPage() {
   const [success, setSuccess] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
-  const API_URL = process.env.NEXT_PUBLIC_API_URL
+  const API_URL = "https://libreprose.onrender.com"
   console.log(API_URL)
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()

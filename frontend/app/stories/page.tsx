@@ -31,7 +31,7 @@ export default function Component() {
   const [newDescription, setNewDescription] = useState('')
   const [isOpen, setIsOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
-  const API_URL = process.env.NEXT_PUBLIC_API_URL
+  const API_URL = "https://libreprose.onrender.com"
   const router = useRouter()
 
   const fetchStories = async () => {
