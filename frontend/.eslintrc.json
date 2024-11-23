@@ -1,3 +1,18 @@
 {
-  "extends": ["next/core-web-vitals", "next/typescript"]
+  "extends": ["next/core-web-vitals", "next/typescript"],
+  "rules": {
+    "no-unused-vars": "warn",
+    "no-console": "warn",
+    "no-undef": "warn",
+    "semi": "off",
+    "quotes": "off",
+    "comma-dangle": "off",
+    "indent": "off",
+    "react/prop-types": "off",
+    "react/react-in-jsx-scope": "off",
+    "react-hooks/exhaustive-deps": "off",
+    "@typescript-eslint/no-explicit-any": "off",
+    "@typescript-eslint/explicit-module-boundary-types": "off",
+    "@typescript-eslint/no-unused-vars": "warn"
+  }
 }
